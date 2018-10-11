@@ -1,0 +1,157 @@
+#include "log.h"
+#include "memory.h"
+#include "mempool.h"
+#include <assert.h>
+#include <string.h>
+
+static void mempool_init_chain(struct mempool_chain *chain)
+{
+	chain->last = NULL;
+	chain->last_free = 0;
+	chain->num_blocks = 0;
+	chain->total_size = 0;
+}
+
+static void mempool_free_chain(struct mempool_chain *chain)
+{
+	struct mempool_block *block;
+	void *mem;
+
+	while (chain->last) {
+		block = chain->last;
+		chain->last = chain->last->prev;
+		
+		mem = (unsigned char *)block - block->size;
+		LOGF(LOG_DEBUG, "About to free raw block at %p", mem);
+
+		chain->num_blocks--;
+		chain->total_size -= block->alloc_size;
+		free(mem);
+	}
+}
+
+struct mempool_block *mempool_new_block(struct mempool_chain *chain, size_t size)
+{
+	// TODO Alignment
+
+	struct mempool_block *new_block;
+	size_t alloc_size;
+	void *mem;
+
+	alloc_size = size + sizeof(*new_block);
+	
+	mem = fdap_malloc(alloc_size);
+
+	LOGF(LOG_DEBUG, "Alocated new block, alloc_size = %zu B and size = %zu B",
+		alloc_size, size);
+	LOGF(LOG_DEBUG, "Raw block starts at %p", mem);
+
+	new_block = (struct mempool_block *)((unsigned char *)mem + size);
+
+	LOGF(LOG_DEBUG, "Block trailer resides at %p", (void *)new_block);
+
+	new_block->alloc_size = alloc_size;
+	new_block->size = size;
+
+	new_block->prev = chain->last;
+	chain->last = new_block;
+
+	chain->total_size += alloc_size;
+	chain->num_blocks++;
+	chain->last_free = size;
+
+	return new_block;
+}
+
+static inline void *mempool_alloc_chain(struct mempool_chain *chain, size_t size)
+{
+	size_t free_size;
+
+	free_size = chain->last_free;
+	assert(free_size >= size);
+
+	assert(chain->last_free >= size);
+	chain->last_free -= size;
+
+	return (unsigned char *)chain->last - free_size;
+}
+
+void mempool_init(struct mempool *pool, size_t block_size)
+{
+	pool->block_size = block_size;
+	pool->small_treshold = block_size / 2;
+
+	mempool_init_chain(&pool->small);
+	mempool_init_chain(&pool->big);
+}
+
+void *mempool_alloc(struct mempool *pool, size_t size)
+{
+	LOGF(LOG_DEBUG, "Alloc request, size = %zu B", size);
+
+	if (size <= pool->small_treshold) {
+		if (pool->small.last_free < size) {
+			LOG(LOG_DEBUG, "Allocating block in small chain");
+			mempool_new_block(&pool->small, pool->block_size);
+		}
+
+		return mempool_alloc_chain(&pool->small, size);
+	}
+	else {
+		LOG(LOG_DEBUG, "Allocating block in big chain");
+		mempool_new_block(&pool->big, size);
+		return mempool_alloc_chain(&pool->big, size);
+	}
+}
+
+void mempool_free(struct mempool *pool)
+{
+	mempool_free_chain(&pool->small);
+	mempool_free_chain(&pool->big);
+}
+
+static void mempool_print_chain_stats(struct mempool_chain *chain)
+{
+	printf("%lu blocks, %lu B total\n", chain->num_blocks, chain->total_size);
+}
+
+void mempool_print_stats(struct mempool *pool)
+{
+	printf("Mempool stats:\n");
+	printf("\tBig objects chain: ");
+	mempool_print_chain_stats(&pool->big);
+	printf("\tSmall objects chain: ");
+	mempool_print_chain_stats(&pool->small);
+}
+
+char *mempool_memcpy(struct mempool *pool, char *src, size_t len)
+{
+	char *dst;
+
+	if (!src)
+		return NULL;
+
+	dst = mempool_alloc(pool, len);
+
+	DEBUG_EXPR("%lu", len);
+
+	memcpy(dst, src, len);
+	return dst;
+}
+
+char *mempool_strdup(struct mempool *pool, char *orig)
+{
+	char *dup;
+	size_t len;
+
+	if (!orig)
+		return NULL;
+
+	len = strlen(orig);
+	dup = mempool_alloc(pool, len + 1);
+
+	memcpy(dup, orig, len + 1);
+	dup[len] = '\0';
+
+	return dup;	
+}

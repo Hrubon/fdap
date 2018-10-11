@@ -1,0 +1,14 @@
+update 2 "
+{
+	read-only: {
+		admin: false,
+		username: 'kajinek',
+		uid: 1002,
+		gid: 1002,
+		home: '/home/ondra',
+	},
+	name: 'David Čepelík',
+	shell: '/bin/zsh',
+	password: '$6$vb1tLY1qiY$1N7hsn57c1Cnd3FhQSPob7I9c7qgekaOlu2u7Vx1hWEO/zevJfmWXzNu.mYz9PwgGHwPTQbaMCBWf8FMhB49e.',
+}";
+

@@ -1,0 +1,6 @@
+create "{a: 1}";
+create "{a: 2}";
+create "{a: 3}";
+update "2" "{b: 2}";
+update "3" "{b: 3}";
+search "b >= 2";
